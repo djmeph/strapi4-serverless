@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  dev:
+    build: ./
+    command: sh -c "tail -f /dev/null"
+    working_dir: /src
+    volumes:
+      - ./:/src:delegated
+      - /src/backend/node_modules
+      # - /src/frontend/node_modules
+      - /src/infrastructure/node_modules
+      - ~/.ssh:/root/.ssh:ro
+      - ~/.aws:/root/.aws:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 1337:1337
+  database:
+    image: mysql:5.7
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'strapi'
+      MYSQL_USER: 'dev'
+      MYSQL_PASSWORD: 'dev'
+      MYSQL_ROOT_PASSWORD: 'strapi'
+    ports:
+      - '3306:3306'
+    expose:
+      - '3306'
+    volumes:
+      - db:/var/lib/mysql
+volumes:
+  db:

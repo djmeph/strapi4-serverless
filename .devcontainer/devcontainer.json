@@ -1,0 +1,13 @@
+{
+  "dockerComposeFile": ["../dev/docker-compose.yml"],
+  "service": "dev",
+  "workspaceFolder": "/src",
+  "extensions": [
+    "eamodio.gitlens",
+    "redhat.vscode-yaml",
+    "ms-azuretools.vscode-docker"
+  ],
+  "settings": {
+    "editor.tabSize": 2
+  }
+}

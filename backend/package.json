@@ -11,6 +11,7 @@
   },
   "devDependencies": {},
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.53.0",
     "@strapi/plugin-graphql": "4.1.2",
     "@strapi/plugin-i18n": "4.1.2",
     "@strapi/plugin-users-permissions": "4.1.2",

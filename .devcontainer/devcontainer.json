@@ -1,6 +1,6 @@
 {
   "dockerComposeFile": ["../dev/docker-compose.yml"],
-  "service": "dev",
+  "service": "strapi4-serverless-dev",
   "workspaceFolder": "/src",
   "extensions": [
     "eamodio.gitlens",

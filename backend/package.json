@@ -11,6 +11,7 @@
   },
   "devDependencies": {},
   "dependencies": {
+    "@strapi/plugin-graphql": "4.1.2",
     "@strapi/plugin-i18n": "4.1.2",
     "@strapi/plugin-users-permissions": "4.1.2",
     "@strapi/provider-upload-aws-s3": "^4.1.2",

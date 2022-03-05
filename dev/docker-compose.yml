@@ -1,6 +1,6 @@
 version: '3.8'
 services:
-  dev:
+  strapi4-serverless-dev:
     build: ./
     command: sh -c "tail -f /dev/null"
     working_dir: /src
@@ -14,7 +14,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - 1337:1337
-  database:
+  strapi4-serverless-db:
     image: mysql:5.7
     restart: always
     environment:

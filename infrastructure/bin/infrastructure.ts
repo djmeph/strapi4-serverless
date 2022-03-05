@@ -4,4 +4,4 @@ import { InfrastructureStack } from '../lib/infrastructure-stack';
 import { config } from '../lib/config';
 
 const app = new cdk.App();
-new InfrastructureStack(app, 'InfrastructureStack', config);
+new InfrastructureStack(app, 'Strapi4ServerlessStack', config);

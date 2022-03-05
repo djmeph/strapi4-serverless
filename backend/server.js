@@ -1,4 +1,4 @@
-const strapi = require('@strapi/satrapi');
+const strapi = require('@strapi/strapi');
 const { SecretsManager } = require('@aws-sdk/client-secrets-manager');
 
 (async () => {

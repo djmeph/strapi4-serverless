@@ -1,13 +1,18 @@
-import { Stack, StackProps } from 'aws-cdk-lib';
+import { Fn, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { Certificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
 import { InstanceType, IVpc, NatProvider, Peer, Port, SecurityGroup, SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { ContainerImage, LogDrivers } from 'aws-cdk-lib/aws-ecs';
+import { ApplicationLoadBalancedFargateService } from 'aws-cdk-lib/aws-ecs-patterns';
 import { AuroraMysqlEngineVersion, DatabaseClusterEngine, ServerlessCluster } from 'aws-cdk-lib/aws-rds';
 import { HostedZone, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { ISecret, Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { InfrastructureStackProps } from './infrastructure-interface';
+import * as path from 'path';
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 
 const cidrBlocks = {
@@ -31,6 +36,7 @@ export class InfrastructureStack extends Stack {
   db: ServerlessCluster;
   certificate: ICertificate;
   domainZone: IHostedZone;
+  service: ApplicationLoadBalancedFargateService;
 
   constructor(
     scope: Construct,
@@ -44,6 +50,8 @@ export class InfrastructureStack extends Stack {
     this.createRdsDatabase();
     this.createCertificate();
     this.createHostedZone();
+    this.createFargateContainer();
+    this.createAccessPolicies();
   }
 
   private createVPC() {
@@ -141,5 +149,88 @@ export class InfrastructureStack extends Stack {
     this.domainZone = HostedZone.fromLookup(this, 'HostedZone', {
       domainName: this.props.domainName
     });
+  }
+
+  private createFargateContainer() {
+    const logGroup = new LogGroup(this, 'LogGroup', {
+      logGroupName: this.props.logGroupName,
+      removalPolicy: RemovalPolicy.DESTROY
+    });
+
+    const image = ContainerImage.fromAsset(
+      path.join(__dirname, '../..', 'backend/docker')
+    );
+
+    this.service = new ApplicationLoadBalancedFargateService(
+      this,
+      'ApplicationLoadBalancedFargateService',
+      {
+        taskImageOptions: {
+          image,
+          environment: {
+            NODE_ENV: 'production',
+            JWT_SECRET_ARN: this.jwtSecret.secretArn,
+            CREDS_SECRET_ARN: this.dbCreds.secretArn,
+            APP_KEYS_SECRET_ARN: this.appKeysSecret.secretArn,
+            AWS_BUCKET: this.assetsBucket.bucketName,
+            PORT: '8080'
+          },
+          logDriver: LogDrivers.awsLogs({
+            streamPrefix: this.props.subdomain,
+            logGroup,
+          }),
+          containerPort: 8080,
+        },
+        vpc: this.vpc,
+        taskSubnets: {
+          subnetType: SubnetType.PUBLIC,
+        },
+        cpu: 512,
+        memoryLimitMiB: 2048,
+        desiredCount: 1,
+        domainName: `${this.props.subdomain}.${this.props.domainName}`,
+        domainZone: this.domainZone,
+        certificate: this.certificate,
+        assignPublicIp: true,
+      }
+    );
+  }
+
+  private createAccessPolicies() {
+    const s3PolicyStatement = new PolicyStatement({
+      actions: [
+        's3:PutObject',
+        's3:GetObjectAcl',
+        's3:GetObject',
+        's3:AbortMultipartUpload',
+        's3:ListBucket',
+        's3:DeleteObject',
+        's3:PutObjectAcl',
+        's3:GetObjectAcl',
+        's3:PutObjectAcl'
+      ],
+      effect: Effect.ALLOW,
+      resources: [
+        this.assetsBucket.bucketArn,
+        Fn.join('/', [this.assetsBucket.bucketArn, '*'])
+      ],
+    });
+
+    const secretsPolicyStatement = new PolicyStatement({
+      actions: [
+        'secretsmanager:DescribeSecret',
+        'secretsmanager:GetSecretValue',
+        'secretsmanager:ListSecretVersionIds'
+      ],
+      effect: Effect.ALLOW,
+      resources: [
+        this.dbCreds.secretArn,
+        this.jwtSecret.secretArn,
+        this.appKeysSecret.secretArn,
+      ],
+    });
+
+    this.service.taskDefinition.taskRole.addToPrincipalPolicy(secretsPolicyStatement);
+    this.service.taskDefinition.taskRole.addToPrincipalPolicy(s3PolicyStatement);
   }
 }

@@ -7,7 +7,7 @@ services:
     volumes:
       - ../:/src:delegated
       - /src/backend/node_modules
-      # - /src/frontend/node_modules
+      - /src/frontend/node_modules
       - /src/infrastructure/node_modules
       - ~/.ssh:/root/.ssh:ro
       - ~/.aws:/root/.aws:ro

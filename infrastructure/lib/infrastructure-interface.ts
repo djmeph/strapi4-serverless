@@ -7,7 +7,8 @@ import { Environment, StackProps } from 'aws-cdk-lib/core'
 export interface InfrastructureStackProps extends StackProps {
   env: Environment;
   domainName: string;
-  subdomain: string;
+  backendSubdomain: string;
+  frontendSubdomain: string;
   certificateArn: string;
   logGroupName: string;
 }

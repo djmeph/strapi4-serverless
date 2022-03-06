@@ -2,7 +2,7 @@ import React, { useState, useContext } from 'react';
 import { useForm, reset } from 'react-hook-form';
 import { UserContext } from '../context/user';
 
-function registerForm() {
+const RegisterForm = () => {
   const { doRegister } = useContext(UserContext);
 
   const {
@@ -104,4 +104,4 @@ function registerForm() {
   );
 }
 
-export default registerForm;
+export default RegisterForm;

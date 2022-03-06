@@ -1,8 +1,8 @@
-import { Fn, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { App, Fn, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { Certificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
 import { InstanceType, IVpc, NatProvider, Peer, Port, SecurityGroup, SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
-import { ContainerImage, LogDrivers } from 'aws-cdk-lib/aws-ecs';
+import { Cluster, ContainerImage, LogDrivers } from 'aws-cdk-lib/aws-ecs';
 import { ApplicationLoadBalancedFargateService } from 'aws-cdk-lib/aws-ecs-patterns';
 import { AuroraMysqlEngineVersion, DatabaseClusterEngine, ServerlessCluster } from 'aws-cdk-lib/aws-rds';
 import { HostedZone, IHostedZone } from 'aws-cdk-lib/aws-route53';
@@ -14,15 +14,12 @@ import * as path from 'path';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
-
 const cidrBlocks = {
-  vpcCidr: '10.11.0.0/16',
-  publicSubnetACidr: '10.11.0.0/20',
-  publicSubnetBCidr: '10.11.16.0/20',
-  privateSubnetACidr: '10.11.32.0/20',
-  privateSubnetBCidr: '10.11.48.0/20',
-  isolatedSubnetACidr: '10.11.64.0/20',
-  isolatedSubnetBCidr: '10.11.80.0/20',
+  vpcCidr: '10.12.0.0/16',
+  publicSubnetACidr: '10.12.0.0/20',
+  publicSubnetBCidr: '10.12.16.0/20',
+  isolatedSubnetACidr: '10.12.32.0/20',
+  isolatedSubnetBCidr: '10.12.48.0/20'
 };
 
 export class InfrastructureStack extends Stack {
@@ -36,7 +33,10 @@ export class InfrastructureStack extends Stack {
   db: ServerlessCluster;
   certificate: ICertificate;
   domainZone: IHostedZone;
-  service: ApplicationLoadBalancedFargateService;
+  logGroup: LogGroup;
+  ecsCluster: Cluster;
+  backendService: ApplicationLoadBalancedFargateService;
+  frontendService: ApplicationLoadBalancedFargateService;
 
   constructor(
     scope: Construct,
@@ -50,8 +50,11 @@ export class InfrastructureStack extends Stack {
     this.createRdsDatabase();
     this.createCertificate();
     this.createHostedZone();
-    this.createFargateContainer();
-    this.createAccessPolicies();
+    this.createLogGroup();
+    this.createEcsCluster();
+    this.createBackendFargateContainer();
+    this.createBackendAccessPolicies();
+    this.createFrontendFargateContainer();
   }
 
   private createVPC() {
@@ -65,20 +68,11 @@ export class InfrastructureStack extends Stack {
           cidrMask: 20,
         },
         {
-          name: 'private',
-          subnetType: SubnetType.PRIVATE_WITH_NAT,
-          cidrMask: 20,
-        },
-        {
           name: 'isolated',
           subnetType: SubnetType.PRIVATE_ISOLATED,
           cidrMask: 20,
         },
-      ],
-      natGatewayProvider: NatProvider.instance({
-        instanceType: new InstanceType('t3.nano')
-      }),
-      natGateways: 1
+      ]
     });
   }
 
@@ -151,19 +145,32 @@ export class InfrastructureStack extends Stack {
     });
   }
 
-  private createFargateContainer() {
-    const logGroup = new LogGroup(this, 'LogGroup', {
+  private createLogGroup() {
+    this.logGroup = new LogGroup(this, 'LogGroup', {
       logGroupName: this.props.logGroupName,
       removalPolicy: RemovalPolicy.DESTROY
     });
+  }
 
+  private createEcsCluster() {
+    this.ecsCluster = new Cluster(this, 'EcsCluster', {
+      vpc: this.vpc,
+    });
+  }
+
+  private createBackendFargateContainer() {
     const image = ContainerImage.fromAsset(
-      path.join(__dirname, '../..', 'backend/docker')
+      path.join(__dirname, '../..', 'backend/docker'),
+      {
+        buildArgs: {
+          port: '8080',
+        }
+      }
     );
 
-    this.service = new ApplicationLoadBalancedFargateService(
+    this.backendService = new ApplicationLoadBalancedFargateService(
       this,
-      'ApplicationLoadBalancedFargateService',
+      'BackendApplicationLoadBalancedFargateService',
       {
         taskImageOptions: {
           image,
@@ -173,22 +180,22 @@ export class InfrastructureStack extends Stack {
             CREDS_SECRET_ARN: this.dbCreds.secretArn,
             APP_KEYS_SECRET_ARN: this.appKeysSecret.secretArn,
             AWS_BUCKET: this.assetsBucket.bucketName,
-            PORT: '8080'
+            PORT: '8080',
           },
           logDriver: LogDrivers.awsLogs({
-            streamPrefix: this.props.subdomain,
-            logGroup,
+            streamPrefix: this.props.backendSubdomain,
+            logGroup: this.logGroup,
           }),
           containerPort: 8080,
         },
-        vpc: this.vpc,
+        cluster: this.ecsCluster,
         taskSubnets: {
           subnetType: SubnetType.PUBLIC,
         },
         cpu: 512,
         memoryLimitMiB: 2048,
         desiredCount: 1,
-        domainName: `${this.props.subdomain}.${this.props.domainName}`,
+        domainName: `${this.props.backendSubdomain}.${this.props.domainName}`,
         domainZone: this.domainZone,
         certificate: this.certificate,
         assignPublicIp: true,
@@ -196,7 +203,7 @@ export class InfrastructureStack extends Stack {
     );
   }
 
-  private createAccessPolicies() {
+  private createBackendAccessPolicies() {
     const s3PolicyStatement = new PolicyStatement({
       actions: [
         's3:PutObject',
@@ -230,7 +237,46 @@ export class InfrastructureStack extends Stack {
       ],
     });
 
-    this.service.taskDefinition.taskRole.addToPrincipalPolicy(secretsPolicyStatement);
-    this.service.taskDefinition.taskRole.addToPrincipalPolicy(s3PolicyStatement);
+    this.backendService.taskDefinition.taskRole.addToPrincipalPolicy(secretsPolicyStatement);
+    this.backendService.taskDefinition.taskRole.addToPrincipalPolicy(s3PolicyStatement);
+  }
+
+  private createFrontendFargateContainer () {
+    const image = ContainerImage.fromAsset(
+      path.join(__dirname, '../..', 'frontend'),
+      {
+        buildArgs: {
+          port: '8080',
+          publicApiUrl: `https://${this.props.backendSubdomain}.${this.props.domainName}`,
+          publicUrl: `https://${this.props.frontendSubdomain}.${this.props.domainName}`
+        }
+      }
+    );
+
+    this.frontendService = new ApplicationLoadBalancedFargateService(
+      this,
+      'FrontendApplicationLoadBalancedFargateService',
+      {
+        taskImageOptions: {
+          image,
+          logDriver: LogDrivers.awsLogs({
+            streamPrefix: this.props.frontendSubdomain,
+            logGroup: this.logGroup,
+          }),
+          containerPort: 8080,
+        },
+        cluster: this.ecsCluster,
+        taskSubnets: {
+          subnetType: SubnetType.PUBLIC,
+        },
+        cpu: 512,
+        memoryLimitMiB: 2048,
+        desiredCount: 1,
+        domainName: `${this.props.frontendSubdomain}.${this.props.domainName}`,
+        domainZone: this.domainZone,
+        certificate: this.certificate,
+        assignPublicIp: true,
+      }
+    );
   }
 }

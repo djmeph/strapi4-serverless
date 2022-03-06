@@ -1,5 +1,5 @@
 import axios from '../../../lib/api';
-export default async (req, res) => {
+const api = async (req, res) => {
   if (req.method === 'POST') {
     res = await axios
 
@@ -23,3 +23,5 @@ export default async (req, res) => {
       });
   }
 };
+
+export default api;
